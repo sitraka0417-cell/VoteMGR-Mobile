@@ -24,9 +24,26 @@ jobs:
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - name: Build debug APK
-        run: gradle assembleDebug --stacktrace
+        run: |
+          set -o pipefail
+          gradle assembleDebug --console=plain 2>&1 | tee build.log
+
+      - name: Résumé des erreurs
+        if: failure()
+        run: |
+          echo '## Erreurs de compilation' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -E "error:|What went wrong|Execution failed|Could not" -A3 build.log | head -80 >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
       - uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: VoteMGR-apk
           path: app/build/outputs/apk/debug/*.apk
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: build.log
