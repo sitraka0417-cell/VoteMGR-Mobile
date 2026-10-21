@@ -189,7 +189,32 @@ public class Skin3D {
 		}
 	}
 
+	private static void styleMini(Button b) {
+		int base = 0xFFE53935;
+		int rayon = dp(12);
+		int prof = dp(4);
+		StateListDrawable sl = new StateListDrawable();
+		sl.addState(new int[]{android.R.attr.state_pressed}, boutonCouche(lighten(base, 0.18f), base, darken(base, 0.32f), rayon, prof, dp(2)));
+		sl.addState(new int[]{}, boutonCouche(lighten(base, 0.18f), base, darken(base, 0.32f), rayon, prof, 0));
+		b.setBackground(sl);
+		b.setPadding(dp(6), dp(4), dp(6), dp(4) + prof);
+		b.setMinWidth(dp(46));
+		b.setMinimumWidth(dp(46));
+		b.setMinHeight(dp(44));
+		b.setMinimumHeight(dp(44));
+		b.setAllCaps(false);
+		b.setTextColor(Color.WHITE);
+		b.setTextSize(16);
+		if (Build.VERSION.SDK_INT >= 21) {
+			b.setStateListAnimator(null);
+		}
+	}
+
 	private static void styleButton(Button b, boolean onDark) {
+		if ("mini".equals(b.getTag())) {
+			styleMini(b);
+			return;
+		}
 		if ("tool".equals(b.getTag())) {
 			styleOutil(b, onDark);
 			return;
