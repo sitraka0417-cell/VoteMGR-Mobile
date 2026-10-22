@@ -51,6 +51,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 
 public class VoteActivity extends Activity {
+	private volatile boolean arretDemande = false;
+	private volatile java.net.Socket socketCourant = null;
+
 	
 	@Override
 	protected void onCreate(Bundle _savedInstanceState) {
@@ -128,6 +131,11 @@ final String[] voteEnAttente = new String[]{null};
 final HashMap<String, ArrayList<String>> choixEnvoyes = new HashMap<String, ArrayList<String>>();
 final HashMap<String, Boolean> confirmes = new HashMap<String, Boolean>();
 final boolean[] listeOuverte = new boolean[]{false};
+final String[] cleDernier = new String[]{""};
+final String[] uidDernier = new String[]{""};
+final String[] sessDernier = new String[]{""};
+final String[] sidVu = new String[]{""};
+final long[] seqVu = new long[]{-1L};
 final HashMap<String, ArrayList<String>> selectionsEnCours = new HashMap<String, ArrayList<String>>();
 		
 		class Reseau {
@@ -380,7 +388,12 @@ ArrayList<Object[]> calculerElus(JSONObject unite) throws Exception {
 						        runOnUiThread(new Runnable() {
 								            public void run() {
 										                try {
-												                    dernierEtat[0] = etat;
+												                    String sidRecu = etat.optString("sid", "");
+long seqRecu = etat.optLong("seq", -1L);
+if (sidRecu.equals(sidVu[0]) && seqRecu >= 0 && seqRecu < seqVu[0]) return;
+sidVu[0] = sidRecu;
+if (seqRecu >= 0) seqVu[0] = seqRecu;
+dernierEtat[0] = etat;
 if (listeOuverte[0]) afficherListeMembres();
 												                    titreProjet.setText("Projet : " + etat.getString("projet"));
 												                    zoneContenu.removeAllViews();
@@ -430,6 +443,14 @@ if (listeOuverte[0]) afficherListeMembres();
 				
 				    void afficherBloc(final JSONObject unite, LinearLayout parent, final HashMap<String, ArrayList<String>> elusGlobal, final String posteBase) throws Exception {
 						        final String titre = unite.getString("titre");
+final String cle = unite.optString("uid", titre) + "|" + unite.optString("sess", "");
+boolean serveurDitVote = false;
+JSONArray votantsJson = unite.optJSONArray("votants");
+if (votantsJson != null) {
+    for (int iv = 0; iv < votantsJson.length(); iv++) {
+        if (nomParticipant.equals(votantsJson.optString(iv))) serveurDitVote = true;
+    }
+}
 						        final String statut = unite.getString("statut");
 						        final int nbMax = unite.getInt("nbMax");
 						        final int nbAdmis = unite.has("nbAdmis") ? unite.getInt("nbAdmis") : nbMax;
@@ -517,9 +538,9 @@ if (listeOuverte[0]) afficherListeMembres();
 												                }
 										            }
 								            bloc.addView(detailsBox);
-if (choixEnvoyes.containsKey(titre)) {
+if (choixEnvoyes.containsKey(cle)) {
     TextView rappel = new TextView(VoteActivity.this);
-    rappel.setText("🗳 Votre vote : " + joinListe(choixEnvoyes.get(titre)));
+    rappel.setText("🗳 Votre vote : " + joinListe(choixEnvoyes.get(cle)));
     rappel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
     rappel.setTextColor(Color.parseColor("#555555"));
     rappel.setPadding(0, 6, 0, 0);
@@ -531,7 +552,7 @@ if (choixEnvoyes.containsKey(titre)) {
 								            infoTxt.setTextColor(Color.parseColor("#999999"));
 								            bloc.addView(infoTxt);
 								        } else if (statut.equals("ouvert")) {
-								            if (dernierTitreVote[0].equals(titre)) {
+								            if (serveurDitVote || choixEnvoyes.containsKey(cle)) {
 										                LinearLayout carteVote = new LinearLayout(VoteActivity.this);
 carteVote.setOrientation(LinearLayout.VERTICAL);
 carteVote.setBackgroundColor(Color.parseColor("#E8F5E9"));
@@ -542,7 +563,7 @@ envoye.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
 envoye.setTypeface(null, Typeface.BOLD);
 envoye.setTextColor(Color.parseColor("#2E7D32"));
 carteVote.addView(envoye);
-ArrayList<String> choixAffiches = choixEnvoyes.get(titre);
+ArrayList<String> choixAffiches = choixEnvoyes.get(cle);
 if (choixAffiches != null) {
     TextView monChoix = new TextView(VoteActivity.this);
     monChoix.setText("Votre choix : " + joinListe(choixAffiches));
@@ -552,7 +573,7 @@ if (choixAffiches != null) {
     carteVote.addView(monChoix);
 }
 TextView etatEnvoi = new TextView(VoteActivity.this);
-if (confirmes.containsKey(titre)) {
+if (serveurDitVote || confirmes.containsKey(cle)) {
     etatEnvoi.setText("✔ Reçu par l'administrateur — en attente de clôture");
     etatEnvoi.setTextColor(Color.parseColor("#2E7D32"));
 } else {
@@ -574,6 +595,7 @@ bloc.addView(carteVote);
 						    }
 				
 				    void construirePanelVote(final JSONObject unite, final String titre, final int nbMax, JSONArray candArr, HashMap<String, ArrayList<String>> elusGlobal, String posteBase) throws Exception {
+final String cle = unite.optString("uid", titre) + "|" + unite.optString("sess", "");
 						        panelVoteFixe.removeAllViews();
 						        panelVoteFixe.setVisibility(View.VISIBLE);
 						
@@ -609,15 +631,15 @@ bloc.addView(carteVote);
 								            cb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
 								            cb.setPadding(10, 10, 0, 10);
 								            cases.add(cb);
-								            ArrayList<String> selSauvee = selectionsEnCours.get(titre);
+								            ArrayList<String> selSauvee = selectionsEnCours.get(cle);
 if (selSauvee != null && selSauvee.contains(nomCand)) cb.setChecked(true);
 final String nomCandFinal = nomCand;
 cb.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
     public void onCheckedChanged(CompoundButton bouton, boolean coche) {
-        ArrayList<String> sel = selectionsEnCours.get(titre);
+        ArrayList<String> sel = selectionsEnCours.get(cle);
         if (sel == null) {
             sel = new ArrayList<String>();
-            selectionsEnCours.put(titre, sel);
+            selectionsEnCours.put(cle, sel);
         }
         if (coche) {
             if (!sel.contains(nomCandFinal)) sel.add(nomCandFinal);
@@ -668,9 +690,12 @@ conteneurCases.addView(cb);
 												                    return;
 												                }
 										                dernierTitreVote[0] = titre;
-selectionsEnCours.remove(titre);
-choixEnvoyes.put(titre, new ArrayList<String>(choix));
-confirmes.remove(titre);
+cleDernier[0] = cle;
+uidDernier[0] = unite.optString("uid", "");
+sessDernier[0] = unite.optString("sess", "");
+selectionsEnCours.remove(cle);
+choixEnvoyes.put(cle, new ArrayList<String>(choix));
+confirmes.remove(cle);
 envoyerVote(nomParticipant, choix);
 if (dernierEtat[0] != null) afficherEtat(dernierEtat[0]);
 										                dernierTitreVote[0] = titre;
@@ -765,6 +790,8 @@ corpsContainer.removeAllViews();
         obj.put("type", "vote");
         obj.put("nom", nom);
         obj.put("titre", dernierTitreVote[0]);
+        obj.put("uid", uidDernier[0]);
+        obj.put("sess", sessDernier[0]);
         JSONArray arr = new JSONArray();
         for (int i = 0; i < choix.size(); i++) arr.put(choix.get(i));
         obj.put("choix", arr);
@@ -797,11 +824,20 @@ final Reseau reseau = new Reseau();
         int tentatives = 0;
         String[] cibles = ipServeur.split(",");
 int rang = 0;
-while (!isFinishing()) {
+while (!isFinishing() && !arretDemande) {
             Socket socket = null;
+String motif = "";
+String cibleTexte = "";
             try {
                 socket = new Socket();
+socketCourant = socket;
+android.net.Network reseauWifi = trouverReseauWifi();
+if (reseauWifi != null) {
+    try { reseauWifi.bindSocket(socket); } catch (Exception exBind) {}
+}
+
                 final String cible = cibles[rang++ % cibles.length].trim();
+cibleTexte = cible;
 socket.connect(new java.net.InetSocketAddress(cible, 8988), 4000);
 socket.setKeepAlive(true);
 socket.setTcpNoDelay(true);
@@ -826,22 +862,36 @@ socket.setSoTimeout(40000);
                             reseau.afficherEtat(obj);
                         } else if (type.equals("ack")) {
                             String titreAck = obj.optString("titre", "");
-if (titreAck.equals(dernierTitreVote[0])) voteEnAttente[0] = null;
-confirmes.put(titreAck, Boolean.TRUE);
+final String cleAck = obj.optString("uid", titreAck).length() > 0 ? obj.optString("uid", titreAck) + "|" + obj.optString("sess", "") : titreAck + "|";
+if (cleAck.equals(cleDernier[0])) voteEnAttente[0] = null;
+if (obj.optBoolean("ok", true)) {
+    confirmes.put(cleAck, Boolean.TRUE);
+} else {
+    choixEnvoyes.remove(cleAck);
+    confirmes.remove(cleAck);
+    runOnUiThread(new Runnable() {
+        public void run() {
+            Toast.makeText(VoteActivity.this, "Vote non pris en compte : le scrutin a changé. Votez à nouveau.", Toast.LENGTH_LONG).show();
+        }
+    });
+}
 if (dernierEtat[0] != null) reseau.afficherEtat(dernierEtat[0]);
                         }
                     } catch (Exception e) {}
                 }
             } catch (Exception e) {
                 tentatives++;
+                motif = e.getClass().getSimpleName() + (e.getMessage() != null ? " : " + e.getMessage() : "");
             }
             writerRef[0] = null;
             try { if (socket != null) socket.close(); } catch (Exception e2) {}
             if (isFinishing()) return;
             final int essai = tentatives;
+            final String motifF = motif;
+            final String cibleF = cibleTexte;
             runOnUiThread(new Runnable() {
                 public void run() {
-                    statutConnexion.setText("⚠ Connexion perdue — reconnexion automatique" + (essai > 1 ? " (essai " + essai + ")" : "") + "...");
+                    statutConnexion.setText("⚠ Connexion impossible ou perdue (" + cibleF + ")" + (essai > 1 ? " — essai " + essai : "") + " — nouvelle tentative…" + (motifF.length() > 0 ? "\n" + motifF : ""));
                 }
             });
             try { Thread.sleep(1500); } catch (InterruptedException ie) { return; }
@@ -850,6 +900,30 @@ if (dernierEtat[0] != null) reseau.afficherEtat(dernierEtat[0]);
 }).start();
 	}
 	
+	@Override
+	protected void onDestroy() {
+		arretDemande = true;
+		try { if (socketCourant != null) socketCourant.close(); } catch (Exception e) {}
+		super.onDestroy();
+	}
+
+	/** Reseau Wi-Fi : evite que Android route le trafic local par la 4G quand le Wi-Fi n'a pas internet. */
+	private android.net.Network trouverReseauWifi() {
+		try {
+			if (android.os.Build.VERSION.SDK_INT >= 21) {
+				android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(android.content.Context.CONNECTIVITY_SERVICE);
+				android.net.Network[] reseaux = cm.getAllNetworks();
+				if (reseaux != null) {
+					for (int i = 0; i < reseaux.length; i++) {
+						android.net.NetworkCapabilities c = cm.getNetworkCapabilities(reseaux[i]);
+						if (c != null && c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI)) return reseaux[i];
+					}
+				}
+			}
+		} catch (Exception e) {}
+		return null;
+	}
+
 	private void initializeLogic() {
 	}
 	

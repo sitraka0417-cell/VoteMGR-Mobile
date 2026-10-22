@@ -74,6 +74,13 @@ import org.json.JSONArray;
 public class AdminActivity extends Activity {
 	private byte[] pdfEnAttente = null;
 	private Runnable diffuserEtat = null;
+	private Runnable gestionRetour = null;
+	private volatile boolean serveurActif = true;
+	private volatile ServerSocket serveurSocketRef = null;
+	private final java.util.List<Socket> socketsClients = new java.util.concurrent.CopyOnWriteArrayList<Socket>();
+	private final java.util.concurrent.ExecutorService envoiSerie = java.util.concurrent.Executors.newSingleThreadExecutor();
+	private final String sidServeur = Long.toHexString(System.nanoTime()) + Integer.toHexString(new java.util.Random().nextInt());
+	private volatile long seqEtat = 0;
 
 	
 	@Override
@@ -444,6 +451,7 @@ final String ipsLocales = ipsJointes.isEmpty() ? ipTrouvee : ipsJointes;
 				    // ---------- Consultation ----------
 				    void afficherEcranConsultation() {
 				        enConsultation = true;
+ecranCourant = "autre";
 				        screenContainer.removeAllViews();
 				        screenContainer.setOrientation(LinearLayout.VERTICAL);
 
@@ -825,6 +833,7 @@ titreS.setText(romain(s + 1) + ".  " + titreSection + (termines == subs.size() ?
 
 				    void afficherCreationProjet() {
 						        enConsultation = false;
+ecranCourant = "creation";
 						        screenContainer.removeAllViews();
 						        LinearLayout layout = new LinearLayout(AdminActivity.this);
 						        layout.setOrientation(LinearLayout.VERTICAL);
@@ -868,7 +877,13 @@ titreS.setText(romain(s + 1) + ".  " + titreSection + (termines == subs.size() ?
 												                }
 										                SharedPreferences prefs = getSharedPreferences("VoteMGR", MODE_PRIVATE);
 										                prefs.edit().putString("membres_courant", "[]").apply();
-										                nomProjet[0] = nom;
+										                sections.clear();
+sessions.clear();
+sousSectionOuverte[0] = null;
+etatCache = null;
+dernierSauve = null;
+nomProjet[0] = nom;
+broadcastEtat();
 										                afficherEcranPrincipal();
 										            }
 								        });
@@ -878,6 +893,7 @@ titreS.setText(romain(s + 1) + ".  " + titreSection + (termines == subs.size() ?
 				
 				    void afficherEcranPrincipal() {
 						        enConsultation = false;
+ecranCourant = "principal";
 						        screenContainer.removeAllViews();
 						        screenContainer.setOrientation(LinearLayout.VERTICAL);
 						
@@ -1098,6 +1114,7 @@ scrollVersBasDemande = true;
 				
 				    void afficherEcranSessions() {
 						        enConsultation = false;
+ecranCourant = "autre";
 						        screenContainer.removeAllViews();
 						        ScrollView scroll = new ScrollView(AdminActivity.this);
 						        LinearLayout rootLayout = new LinearLayout(AdminActivity.this);
@@ -1170,10 +1187,7 @@ scrollVersBasDemande = true;
 												                    for (int i = 0; i < arr.length(); i++) listeImportee.add(arr.getString(i));
 												                } catch (Exception e) {}
 										
-										                if (listeImportee.size() == 0) {
-												                    Toast.makeText(AdminActivity.this, "Importez d'abord une liste de membres (TXT) depuis l'écran principal", Toast.LENGTH_LONG).show();
-												                    return;
-												                }
+										                
 										
 										                LinearLayout dialogLayout = new LinearLayout(AdminActivity.this);
 										                dialogLayout.setOrientation(LinearLayout.VERTICAL);
@@ -1204,7 +1218,38 @@ scrollVersBasDemande = true;
 												                    listeCasesLayout.addView(cb);
 												                }
 										
-										                champRecherche.addTextChangedListener(new TextWatcher() {
+										                LinearLayout ligneManuel = new LinearLayout(AdminActivity.this);
+ligneManuel.setOrientation(LinearLayout.HORIZONTAL);
+final EditText champManuel = new EditText(AdminActivity.this);
+champManuel.setHint("✍ Ajouter un nom manuellement");
+champManuel.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+ligneManuel.addView(champManuel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+Button btnAjoutManuel = new Button(AdminActivity.this);
+btnAjoutManuel.setText("+");
+btnAjoutManuel.setOnClickListener(new View.OnClickListener() {
+    public void onClick(View v3) {
+        String nm = champManuel.getText().toString().trim();
+        if (nm.isEmpty()) return;
+        for (int i = 0; i < casesListe.size(); i++) {
+            if (casesListe.get(i).getText().toString().equalsIgnoreCase(nm)) {
+                casesListe.get(i).setChecked(true);
+                casesListe.get(i).setVisibility(View.VISIBLE);
+                champManuel.setText("");
+                Toast.makeText(AdminActivity.this, "Déjà dans la liste : coché", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
+        CheckBox nouveau = new CheckBox(AdminActivity.this);
+        nouveau.setText(nm);
+        nouveau.setChecked(true);
+        casesListe.add(nouveau);
+        listeCasesLayout.addView(nouveau, 0);
+        champManuel.setText("");
+    }
+});
+ligneManuel.addView(btnAjoutManuel);
+dialogLayout.addView(ligneManuel, 1);
+champRecherche.addTextChangedListener(new TextWatcher() {
 												                    public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
 												                    public void onTextChanged(CharSequence s, int start, int before, int count) {}
 												                    public void afterTextChanged(Editable s) {
@@ -1269,6 +1314,7 @@ scrollVersBasDemande = true;
 				
 				    void afficherEcranListeMembres() {
 						        enConsultation = false;
+ecranCourant = "autre";
 						        screenContainer.removeAllViews();
 						        ScrollView scroll = new ScrollView(AdminActivity.this);
 						        LinearLayout rootLayout = new LinearLayout(AdminActivity.this);
@@ -1334,6 +1380,7 @@ scrollVersBasDemande = true;
 				    void afficherEcranVoteAdmin() {
 						        final HashMap<String, Object> unite = sousSectionOuverte[0];
 						        enConsultation = false;
+ecranCourant = "autre";
 						        screenContainer.removeAllViews();
 						        screenContainer.setOrientation(LinearLayout.VERTICAL);
 						
@@ -1444,6 +1491,7 @@ scrollVersBasDemande = true;
 				    void afficherEcranRoles(final HashMap<String, Object> unite) {
 						        if (!unite.containsKey("roles")) unite.put("roles", new ArrayList<HashMap<String, Object>>());
 						        enConsultation = false;
+ecranCourant = "autre";
 						        screenContainer.removeAllViews();
 						        ScrollView scroll = new ScrollView(AdminActivity.this);
 						        LinearLayout rootLayout = new LinearLayout(AdminActivity.this);
@@ -2388,7 +2436,8 @@ parentBox.addView(rangeeCand);
 														                        Toast.makeText(AdminActivity.this, "Le nombre d'admis dépasse le nombre de candidats", Toast.LENGTH_SHORT).show();
 														                        return;
 														                    }
-												                    unite.put("statut", "ouvert");
+												                    unite.put("sess", java.util.UUID.randomUUID().toString());
+unite.put("statut", "ouvert");
 												                    unite.put("votants", new ArrayList<String>());
 												                    unite.put("votes", new HashMap<String, Integer>());
 												                    sousSectionOuverte[0] = unite;
@@ -2789,6 +2838,7 @@ if (btnVoterSticky != null) {
 				
 				    void afficherEcranResultats() {
 						        enConsultation = false;
+ecranCourant = "autre";
 						        screenContainer.removeAllViews();
 						        ScrollView scroll = new ScrollView(AdminActivity.this);
 						        LinearLayout rootLayout = new LinearLayout(AdminActivity.this);
@@ -2888,6 +2938,9 @@ if (btnVoterSticky != null) {
     JSONObject serialiserUnite(HashMap<String, Object> unite) {
 						        JSONObject o = new JSONObject();
 						        try {
+if (!unite.containsKey("uid")) unite.put("uid", java.util.UUID.randomUUID().toString());
+o.put("uid", (String) unite.get("uid"));
+if (unite.containsKey("sess")) o.put("sess", (String) unite.get("sess"));
 								            o.put("titre", (String) unite.get("titre"));
 								            o.put("statut", (String) unite.get("statut"));
 								            o.put("nbMax", unite.get("nbMax"));
@@ -3005,6 +3058,8 @@ if (unite.containsKey("tourSuivant")) {
 				
 				    HashMap<String, Object> uniteFromJson(JSONObject o) throws Exception {
 						        HashMap<String, Object> u = new HashMap<String, Object>();
+if (o.has("uid")) u.put("uid", o.getString("uid"));
+if (o.has("sess")) u.put("sess", o.getString("sess"));
 						        u.put("titre", o.getString("titre"));
 						        u.put("statut", o.getString("statut"));
 						        u.put("nbMax", o.getInt("nbMax"));
@@ -3134,8 +3189,10 @@ if (o.has("tourSuivant")) {
 								            String nomFichier = "projet_" + nomProjet[0].replace(" ", "_") + ".json";
 								            File fichier = new File(dossier, nomFichier);
 								            FileOutputStream fos = new FileOutputStream(fichier);
-								            fos.write(serialiserProjetComplet().toString().getBytes());
+								            String contenuProjet = serialiserProjetComplet().toString();
+fos.write(contenuProjet.getBytes());
 								            fos.close();
+dernierSauve = contenuProjet;
 								            if (avecToast) {
 										                Toast.makeText(AdminActivity.this, "Projet sauvegardé : " + nomFichier, Toast.LENGTH_SHORT).show();
 										            }
@@ -3182,9 +3239,10 @@ if (o.has("tourSuivant")) {
 														                            while ((ligne = reader.readLine()) != null) sb.append(ligne);
 														                            reader.close();
 														                            JSONObject data = new JSONObject(sb.toString());
-														                            nomProjet[0] = data.getString("projet");
+														                            sousSectionOuverte[0] = null;
+nomProjet[0] = data.getString("projet");
 														                            chargerSectionsDepuisJson(data.getJSONArray("sections"));
-														                            if (data.has("sessions")) chargerSessionsDepuisJson(data.getJSONArray("sessions"));
+														                            if (data.has("sessions")) chargerSessionsDepuisJson(data.getJSONArray("sessions")); else sessions.clear();
 														                            SharedPreferences prefs = getSharedPreferences("VoteMGR", MODE_PRIVATE);
 														                            if (data.has("membres")) {
 																                                prefs.edit().putString("membres_courant", data.getJSONArray("membres").toString()).apply();
@@ -3192,6 +3250,9 @@ if (o.has("tourSuivant")) {
 																                                prefs.edit().putString("membres_courant", "[]").apply();
 																                            }
 														                            Toast.makeText(AdminActivity.this, "Projet chargé : " + nomProjet[0], Toast.LENGTH_SHORT).show();
+sousSectionOuverte[0] = trouverOuverte();
+dernierSauve = serialiserProjetComplet().toString();
+etatCache = null;
 broadcastEtat();
 														                            afficherEcranPrincipal();
 														                        } catch (Exception e) {
@@ -3212,6 +3273,8 @@ String construireEtatJson() {
     JSONObject etat = new JSONObject();
     try {
         etat.put("type", "etat");
+        etat.put("sid", sidServeur);
+        etat.put("seq", ++seqEtat);
         etat.put("projet", nomProjet[0]);
         etat.put("sections", serialiserSections());
         SharedPreferences prefs = getSharedPreferences("VoteMGR", MODE_PRIVATE);
@@ -3223,18 +3286,20 @@ String construireEtatJson() {
 void broadcastEtat() {
     final String msg = construireEtatJson();
     etatCache = msg;
-    new Thread(new Runnable() {
-        public void run() {
-            ArrayList<PrintWriter> morts = new ArrayList<PrintWriter>();
-            for (PrintWriter w : clients) {
-                try {
-                    w.println(msg);
-                    if (w.checkError()) morts.add(w);
-                } catch (Exception e) { morts.add(w); }
+    try {
+        envoiSerie.execute(new Runnable() {
+            public void run() {
+                ArrayList<PrintWriter> morts = new ArrayList<PrintWriter>();
+                for (PrintWriter w : clients) {
+                    try {
+                        w.println(msg);
+                        if (w.checkError()) morts.add(w);
+                    } catch (Exception e) { morts.add(w); }
+                }
+                clients.removeAll(morts);
             }
-            clients.removeAll(morts);
-        }
-    }).start();
+        });
+    } catch (Exception e) {}
 }
 
 void envoyerEtatA(PrintWriter pw) {
@@ -3243,43 +3308,196 @@ void envoyerEtatA(PrintWriter pw) {
     try { pw.println(m); } catch (Exception e) {}
 }
 
-void traiterVote(String nomParticipant, ArrayList<String> choix) {
-						        HashMap<String, Object> unite = sousSectionOuverte[0];
-						        if (unite == null) return;
-						        ArrayList<String> votants = (ArrayList<String>) unite.get("votants");
-						        if (votants.contains(nomParticipant)) return;
-						        votants.add(nomParticipant);
-						        HashMap<String, Integer> votes = (HashMap<String, Integer>) unite.get("votes");
-						        for (int i = 0; i < choix.size(); i++) {
-								            String c = choix.get(i);
-								            int actuel = votes.containsKey(c) ? votes.get(c) : 0;
-								            votes.put(c, actuel + 1);
-								        }
-						        runOnUiThread(new Runnable() {
-								            public void run() {
-										                redessiner();
-										            }
-								        });
-						        broadcastEtat();
-						    }
-				
+				    // ================= Navigation, sauvegarde, identite des scrutins =================
+				    String ecranCourant = "creation";
+				    String dernierSauve = null;
+
+				    HashMap<String, Object> chercherOuverte(HashMap<String, Object> u) {
+				        if ("ouvert".equals(u.get("statut"))) return u;
+				        if (u.containsKey("tourSuivant")) {
+				            HashMap<String, Object> r = chercherOuverte((HashMap<String, Object>) u.get("tourSuivant"));
+				            if (r != null) return r;
+				        }
+				        ArrayList<HashMap<String, Object>> ss = (ArrayList<HashMap<String, Object>>) u.get("sousSections");
+				        if (ss != null) {
+				            for (int i = 0; i < ss.size(); i++) {
+				                HashMap<String, Object> r = chercherOuverte(ss.get(i));
+				                if (r != null) return r;
+				            }
+				        }
+				        return null;
+				    }
+
+				    HashMap<String, Object> trouverOuverte() {
+				        for (int i = 0; i < sections.size(); i++) {
+				            HashMap<String, Object> r = chercherOuverte(sections.get(i));
+				            if (r != null) return r;
+				        }
+				        return null;
+				    }
+
+				    boolean projetNonSauvegarde() {
+				        try {
+				            SharedPreferences prefs = getSharedPreferences("VoteMGR", MODE_PRIVATE);
+				            boolean aDesMembres = prefs.getString("membres_courant", "[]").length() > 2;
+				            if (dernierSauve == null) {
+				                return sections.size() > 0 || sessions.size() > 0 || aDesMembres;
+				            }
+				            return !serialiserProjetComplet().toString().equals(dernierSauve);
+				        } catch (Exception e) {
+				            return false;
+				        }
+				    }
+
+				    void quitterProjet() {
+				        sections.clear();
+				        sessions.clear();
+				        sousSectionOuverte[0] = null;
+				        nomProjet[0] = "";
+				        etatCache = null;
+				        dernierSauve = null;
+				        broadcastEtat();
+				        afficherCreationProjet();
+				    }
+
+				    void demanderQuitterProjet() {
+				        String avertissement = sousSectionOuverte[0] != null ? "\n\n⚠ Un vote est encore ouvert : il sera interrompu." : "";
+				        if (projetNonSauvegarde()) {
+				            new AlertDialog.Builder(AdminActivity.this)
+				                .setTitle("Enregistrer avant de quitter ?")
+				                .setMessage("Le projet « " + nomProjet[0] + " » contient des modifications non enregistrées." + avertissement)
+				                .setPositiveButton("Enregistrer et quitter", new DialogInterface.OnClickListener() {
+				                    public void onClick(DialogInterface dialog, int which) {
+				                        sauvegarderProjetFichier(true);
+				                        quitterProjet();
+				                    }
+				                })
+				                .setNeutralButton("Quitter sans enregistrer", new DialogInterface.OnClickListener() {
+				                    public void onClick(DialogInterface dialog, int which) {
+				                        quitterProjet();
+				                    }
+				                })
+				                .setNegativeButton("Annuler", null)
+				                .show();
+				        } else {
+				            new AlertDialog.Builder(AdminActivity.this)
+				                .setTitle("Quitter le projet ?")
+				                .setMessage("Le projet « " + nomProjet[0] + " » est enregistré." + avertissement)
+				                .setPositiveButton("Quitter", new DialogInterface.OnClickListener() {
+				                    public void onClick(DialogInterface dialog, int which) {
+				                        quitterProjet();
+				                    }
+				                })
+				                .setNegativeButton("Rester", null)
+				                .show();
+				        }
+				    }
+
+				    void gererRetour() {
+				        if (ecranCourant.equals("creation")) {
+				            finish();
+				            return;
+				        }
+				        if (!ecranCourant.equals("principal")) {
+				            afficherEcranPrincipal();
+				            return;
+				        }
+				        demanderQuitterProjet();
+				    }
+
+				    // ---- vote recu du reseau : tout se passe sur le thread UI, accuse envoye ensuite dans l'ordre
+				    void appliquerVote(String nomParticipant, ArrayList<String> choix) {
+				        HashMap<String, Object> unite = sousSectionOuverte[0];
+				        if (unite == null) return;
+				        ArrayList<String> votants = (ArrayList<String>) unite.get("votants");
+				        if (votants.contains(nomParticipant)) return;
+				        votants.add(nomParticipant);
+				        HashMap<String, Integer> votes = (HashMap<String, Integer>) unite.get("votes");
+				        for (int i = 0; i < choix.size(); i++) {
+				            String c = choix.get(i);
+				            int actuel = votes.containsKey(c) ? votes.get(c) : 0;
+				            votes.put(c, actuel + 1);
+				        }
+				        redessiner();
+				        broadcastEtat();
+				    }
+
+				    void traiterVote(final String nomParticipant, final ArrayList<String> choix) {
+				        runOnUiThread(new Runnable() {
+				            public void run() {
+				                appliquerVote(nomParticipant, choix);
+				            }
+				        });
+				    }
+
+				    void traiterVoteReseau(final PrintWriter writer, final String nomP, final ArrayList<String> choix,
+				                           final String uidVote, final String sessVote, final String titreVote) {
+				        runOnUiThread(new Runnable() {
+				            public void run() {
+				                HashMap<String, Object> ouverte = sousSectionOuverte[0];
+				                boolean accepte;
+				                if (uidVote.length() > 0) {
+				                    accepte = ouverte != null && uidVote.equals((String) ouverte.get("uid"))
+				                        && (sessVote.length() == 0 || sessVote.equals((String) ouverte.get("sess")));
+				                } else {
+				                    accepte = ouverte != null;
+				                }
+				                if (accepte) appliquerVote(nomP, choix);
+				                final boolean ok = accepte;
+				                try {
+				                    envoiSerie.execute(new Runnable() {
+				                        public void run() {
+				                            try {
+				                                JSONObject ack = new JSONObject();
+				                                ack.put("type", "ack");
+				                                ack.put("nom", nomP);
+				                                ack.put("titre", titreVote);
+				                                ack.put("uid", uidVote);
+				                                ack.put("sess", sessVote);
+				                                ack.put("ok", ok);
+				                                writer.println(ack.toString());
+				                            } catch (Exception e) {}
+				                        }
+				                    });
+				                } catch (Exception e2) {}
+				            }
+				        });
+				    }
+
 				    void demarrerServeur() {
         new Thread(new Runnable() {
             public void run() {
-                while (true) {
+                boolean dejaAlerte = false;
+                while (serveurActif) {
                     ServerSocket serverSocket = null;
                     try {
                         serverSocket = new ServerSocket();
                         serverSocket.setReuseAddress(true);
                         serverSocket.bind(new java.net.InetSocketAddress(8988));
-                        while (true) {
+                        serveurSocketRef = serverSocket;
+                        if (dejaAlerte) {
+                            dejaAlerte = false;
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    Toast.makeText(AdminActivity.this, "✔ Serveur prêt (port 8988)", Toast.LENGTH_SHORT).show();
+                                }
+                            });
+                        }
+                        while (serveurActif) {
                             try {
                                 final Socket clientSocket = serverSocket.accept();
                                 clientSocket.setKeepAlive(true);
                                 clientSocket.setTcpNoDelay(true);
+                                socketsClients.add(clientSocket);
                                 final PrintWriter writer = new PrintWriter(clientSocket.getOutputStream(), true);
                                 clients.add(writer);
-                                envoyerEtatA(writer);
+                                try {
+                                    envoiSerie.execute(new Runnable() {
+                                        public void run() {
+                                            envoyerEtatA(writer);
+                                        }
+                                    });
+                                } catch (Exception exEnvoi) {}
                                 new Thread(new Runnable() {
                                     public void run() {
                                         try {
@@ -3293,35 +3511,36 @@ void traiterVote(String nomParticipant, ArrayList<String> choix) {
                                                         JSONArray choixArr = obj.getJSONArray("choix");
                                                         ArrayList<String> choix = new ArrayList<String>();
                                                         for (int i = 0; i < choixArr.length(); i++) choix.add(choixArr.getString(i));
-                                                        String titreVote = obj.optString("titre", "");
-                                                        HashMap<String, Object> ouverteMaintenant = sousSectionOuverte[0];
-                                                        if (titreVote.length() == 0 || (ouverteMaintenant != null && titreVote.equals((String) ouverteMaintenant.get("titre")))) {
-                                                            traiterVote(nomP, choix);
-                                                        }
-                                                        try {
-                                                            JSONObject ack = new JSONObject();
-                                                            ack.put("type", "ack");
-                                                            ack.put("nom", nomP);
-                                                            ack.put("titre", titreVote);
-                                                            writer.println(ack.toString());
-                                                        } catch (Exception exAck) {}
+                                                        traiterVoteReseau(writer, nomP, choix, obj.optString("uid", ""),
+                                                            obj.optString("sess", ""), obj.optString("titre", ""));
                                                     }
                                                 } catch (Exception e) {}
                                             }
                                         } catch (Exception e) {}
                                         clients.remove(writer);
+                                        socketsClients.remove(clientSocket);
                                         try { clientSocket.close(); } catch (Exception e2) {}
                                     }
                                 }).start();
                             } catch (Exception exClient) {
                                 // un client qui se coupe ne doit JAMAIS arreter le serveur
-                                if (serverSocket.isClosed()) break;
+                                if (serverSocket.isClosed() || !serveurActif) break;
                             }
                         }
                     } catch (Exception e) {
+                        if (serveurActif && !dejaAlerte) {
+                            dejaAlerte = true;
+                            final String msgErreur = String.valueOf(e.getMessage());
+                            runOnUiThread(new Runnable() {
+                                public void run() {
+                                    Toast.makeText(AdminActivity.this, "⚠ Serveur indisponible (port 8988) : " + msgErreur + " — nouvel essai…", Toast.LENGTH_LONG).show();
+                                }
+                            });
+                        }
                     } finally {
                         try { if (serverSocket != null) serverSocket.close(); } catch (Exception e3) {}
                     }
+                    if (!serveurActif) return;
                     try { Thread.sleep(2000); } catch (InterruptedException ie) { return; }
                 }
             }
@@ -3329,7 +3548,7 @@ void traiterVote(String nomParticipant, ArrayList<String> choix) {
         // battement de coeur : detecte les connexions mortes des deux cotes
         new Thread(new Runnable() {
             public void run() {
-                while (true) {
+                while (serveurActif) {
                     try { Thread.sleep(8000); } catch (InterruptedException ie) { return; }
                     ArrayList<PrintWriter> morts = new ArrayList<PrintWriter>();
                     for (PrintWriter w : clients) {
@@ -3349,6 +3568,12 @@ void traiterVote(String nomParticipant, ArrayList<String> choix) {
 		diffuserEtat = new Runnable() {
 			public void run() {
 				ecrans.broadcastEtat();
+				if (!nomProjet[0].isEmpty()) ecrans.sauvegarderProjetFichier(false);
+			}
+		};
+		gestionRetour = new Runnable() {
+			public void run() {
+				ecrans.gererRetour();
 			}
 		};
 		ecrans.afficherCreationProjet();
@@ -3358,6 +3583,23 @@ void traiterVote(String nomParticipant, ArrayList<String> choix) {
 	private void initializeLogic() {
 	}
 	
+	@Override
+	protected void onDestroy() {
+		serveurActif = false;
+		try { if (serveurSocketRef != null) serveurSocketRef.close(); } catch (Exception e) {}
+		for (Socket sc : socketsClients) {
+			try { sc.close(); } catch (Exception e) {}
+		}
+		try { envoiSerie.shutdownNow(); } catch (Exception e) {}
+		super.onDestroy();
+	}
+
+	@Override
+	public void onBackPressed() {
+		if (gestionRetour != null) gestionRetour.run();
+		else super.onBackPressed();
+	}
+
 	@Override
 	protected void onActivityResult(int _requestCode, int _resultCode, Intent _data) {
 		super.onActivityResult(_requestCode, _resultCode, _data);
